@@ -55,6 +55,40 @@ Namespace(
 )
 ```
 
+## Onboarding (for teammates after pulling A1)
+
+After `git pull`, run from the repo root:
+
+```bash
+source .venv/bin/activate
+uv pip install -e ".[train,dev]"          # picks up new deps like geffnet
+bash scripts/setup_third_party.sh         # clones DSINE + Intrinsic into third_party/
+uv pip install ./third_party/Intrinsic    # pulls in chrislib, altered_midas transitively
+```
+
+If you don't have a `.venv` yet (first time setting up):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # install uv if missing
+uv venv --python 3.10
+source .venv/bin/activate
+# then run the three commands above
+```
+
+Verify the inverse rendering frontend works end-to-end:
+
+```bash
+python scripts/extract_buffers.py \
+    --input <some_portrait.jpg> \
+    --output bundle.pt \
+    --visualize outputs/debug/ \
+    --size 768
+```
+
+First run downloads ~3GB of weights (DSINE + Intrinsic v2 stages + an EfficientNet backbone). Cached after that. Subsequent runs ~22s per image on M1 Max.
+
+Inspect `outputs/debug/02_normal.png` (should be blue/purple on front-facing surfaces) and `outputs/debug/03_albedo.png` (should look flat-lit with skin/clothing colors preserved) to confirm everything's working.
+
 ## Files Created/Changed
 
 ```
