@@ -1,0 +1,24 @@
+{
+  "asset": "/Users/hrithikg/SWRepos/switchlight/data/blender/assets/billie.blend",
+  "hdri_path": "/Users/hrithikg/SWRepos/switchlight/data/blender/hdri/studio_small_03_2k.hdr",
+  "resolution": [
+    768,
+    768
+  ],
+  "samples": 64,
+  "outputs": {
+    "beauty": "beauty_*.png",
+    "albedo": "albedo_*.png",
+    "mask": "mask_*.png",
+    "normal_world_debug": "normal_world_*.png",
+    "normal_camera": "normal_camera_*.png"
+  },
+  "notes": {
+    "beauty": "Cycles beauty render under HDRI lighting, transparent film enabled.",
+    "albedo": "Emission override using material base color / base color texture. Intended as lighting-independent diffuse color approximation.",
+    "mask": "Render layer alpha with transparent film. White foreground, black background.",
+    "normal_world_debug": "Blender default normal pass. World-space debug only. Do not use for renderer training.",
+    "normal_camera": "Camera-space normal remapped from [-1,1] to [0,1]. Use rgb * 2 - 1 when loading into torch.",
+    "normal_contract": "Expected downstream tensor: [3,H,W], float32, camera-space, unit vectors, +Z toward camera if convention check passes."
+  }
+}
