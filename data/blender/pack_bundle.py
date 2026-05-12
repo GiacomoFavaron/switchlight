@@ -103,7 +103,9 @@ def main():
         "roughness": roughness,
         "specular": specular,
         "mask": mask,
-        "hdri_path": meta.get("hdri_path"),
+        "hdri_path": str(
+    Path(meta.get("hdri_path")).relative_to(ROOT)
+),
         "meta": meta,
     }
 
