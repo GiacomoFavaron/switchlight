@@ -1,18 +1,19 @@
-"""Surface normal estimation using DSINE.
+"""Surface normal estimation using DSINE (Bae & Davison, CVPR 2024).
 
-DSINE is not pip-installable. You need to clone the repo and place it
-at third_party/DSINE/ (or set DSINE_ROOT env var to its location).
+DSINE is not pip-installable. You need to clone the repo:
 
     git clone https://github.com/baegwangbin/DSINE.git third_party/DSINE
 
-Pretrained weights are downloaded automatically by DSINE on first use,
-or you can grab them manually from their README.
+The pretrained weights are downloaded automatically from HuggingFace
+(camenduru/DSINE) by torch.hub on first call. Cached under
+~/.cache/torch/hub/checkpoints/.
 
-Important: DSINE was trained on scene-level images (mostly indoor scenes,
-KITTI, etc.), not portrait crops. For tight portrait photos we pad the
-input with mirror reflection to give the model more spatial context,
-then crop the output back. Without this padding, normals around hair
-edges and shoulders look noticeably worse.
+DSINE's official hubconf hardcodes CUDA. We bypass that by directly using
+its model code and weight-loading logic, which lets us target MPS or CPU.
+
+For portrait inputs, we mirror-pad the image before inference. DSINE was
+trained on scene-level imagery and produces noticeably better normals
+around hair and shoulders when given more spatial context.
 """
 
 from __future__ import annotations
@@ -21,16 +22,21 @@ import os
 import sys
 from pathlib import Path
 
-import numpy as np
 import torch
 import torch.nn.functional as F
-from PIL import Image
+from torchvision import transforms
 
-from .io_utils import get_device
+from .io_utils import get_device, linear_to_srgb
 
 
 _DSINE_MODEL = None
 _DSINE_DEVICE = None
+
+# Standard ImageNet normalization, used by DSINE's official Predictor
+_IMAGENET_NORMALIZE = transforms.Normalize(
+    mean=[0.485, 0.456, 0.406],
+    std=[0.229, 0.224, 0.225],
+)
 
 
 def _find_dsine_root() -> Path:
@@ -39,13 +45,12 @@ def _find_dsine_root() -> Path:
     if env := os.environ.get("DSINE_ROOT"):
         candidates.append(Path(env))
 
-    # Common locations relative to project root
     project_root = Path(__file__).resolve().parent.parent
     candidates.append(project_root / "third_party" / "DSINE")
     candidates.append(project_root.parent / "DSINE")
 
     for c in candidates:
-        if c.exists() and (c / "models").exists():
+        if c.exists() and (c / "hubconf.py").exists():
             return c
 
     raise RuntimeError(
@@ -56,39 +61,59 @@ def _find_dsine_root() -> Path:
 
 
 def _load_dsine_model(device: torch.device):
-    """Load DSINE model and pretrained weights. Cached at module level."""
+    """Load DSINE model and pretrained weights. Cached at module level.
+
+    The DSINE_v02 constructor takes an argparse-style Namespace. We construct
+    one with the exact values from projects/dsine/experiments/exp001_cvpr2024/dsine.txt
+    (the CVPR 2024 config that matches the released weights).
+    """
     global _DSINE_MODEL, _DSINE_DEVICE
 
     if _DSINE_MODEL is not None and _DSINE_DEVICE == device:
         return _DSINE_MODEL
 
+    from argparse import Namespace
+
     dsine_root = _find_dsine_root()
-    sys.path.insert(0, str(dsine_root))
+    if str(dsine_root) not in sys.path:
+        sys.path.insert(0, str(dsine_root))
 
-    # DSINE's recent versions expose a hub-style loader.
-    # We try multiple loading strategies depending on which version is checked out.
-    try:
-        # Newer DSINE: torch.hub style
-        model = torch.hub.load(str(dsine_root), "DSINE", source="local", trust_repo=True)
-    except Exception:
-        # Older DSINE: manual instantiation
-        from models.dsine import DSINE  # type: ignore
+    from models.dsine.v02 import DSINE_v02  # type: ignore
 
-        model = DSINE()
-        # Load pretrained weights — adjust path if DSINE's structure changes
-        ckpt_paths = list((dsine_root / "checkpoints").glob("*.pt"))
-        if not ckpt_paths:
-            raise RuntimeError(
-                f"No checkpoint found in {dsine_root}/checkpoints. "
-                "Download per DSINE's README."
-            )
-        state = torch.load(ckpt_paths[0], map_location="cpu")
-        if "model" in state:
-            state = state["model"]
-        model.load_state_dict(state, strict=False)
+    # Hyperparameters from projects/dsine/experiments/exp001_cvpr2024/dsine.txt
+    # plus defaults from projects/dsine/config.py for args not in the config file.
+    # These match the weights at huggingface.co/camenduru/DSINE.
+    args = Namespace(
+        NNET_architecture="v02",
+        NNET_encoder_B=5,
+        NNET_decoder_NF=2048,
+        NNET_decoder_BN=False,
+        NNET_decoder_down=8,
+        NNET_learned_upsampling=True,
+        NNET_output_dim=3,
+        NNET_feature_dim=64,
+        NNET_hidden_dim=64,
+        NRN_prop_ps=5,
+        NRN_num_iter_train=5,
+        NRN_num_iter_test=5,
+        NRN_ray_relu=True,
+    )
 
+    weight_url = "https://huggingface.co/camenduru/DSINE/resolve/main/dsine.pt"
+    state = torch.hub.load_state_dict_from_url(
+        weight_url,
+        file_name="dsine.pt",
+        map_location="cpu",
+    )
+    if "model" in state:
+        state = state["model"]
+
+    model = DSINE_v02(args)
+    model.load_state_dict(state, strict=True)
     model.eval()
-    model.to(device)
+    model = model.to(device)
+    if hasattr(model, "pixel_coords"):
+        model.pixel_coords = model.pixel_coords.to(device)
 
     _DSINE_MODEL = model
     _DSINE_DEVICE = device
@@ -104,7 +129,7 @@ def _pad_for_dsine(image: torch.Tensor, pad_ratio: float = 0.25) -> tuple[torch.
 
     Returns:
         padded: [3, H_pad, W_pad] tensor.
-        crop_box: (top, left, h, w) for cropping back.
+        crop_box: (top, left, h, w) for cropping back to original size.
     """
     _, h, w = image.shape
     pad_h = int(h * pad_ratio)
@@ -128,14 +153,21 @@ def estimate_normals(
 ) -> torch.Tensor:
     """Estimate surface normals from a linear RGB image.
 
+    Mirrors the canonical test pipeline in DSINE's projects/dsine/test.py:
+      1. ImageNet-normalize the (sRGB) image
+      2. Compute padding to multiples of 32 with utils.get_padding
+      3. Apply utils.pad_input which pads the image and shifts intrinsics
+      4. Forward pass; crop back to original size
+
     Args:
         image: [3, H, W] tensor, linear RGB, range [0, 1].
         device: target device. If None, uses get_device().
-        pad: whether to mirror-pad for better portrait results. Recommended.
+        pad: whether to mirror-pad for better portrait results (our addition,
+             on top of DSINE's standard pipeline).
 
     Returns:
-        normals: [3, H, W] tensor, camera space, Z toward camera,
-                 each pixel a unit vector in [-1, 1].
+        normals: [3, H, W] tensor, camera space, each pixel a unit vector
+                 in [-1, 1]. Z convention: positive Z points toward camera.
     """
     if device is None:
         device = get_device()
@@ -145,38 +177,62 @@ def estimate_normals(
 
     model = _load_dsine_model(device)
 
-    # DSINE expects sRGB input in [0, 1], not linear
-    from .io_utils import linear_to_srgb
+    # DSINE expects sRGB-encoded input in [0, 1]
     srgb = linear_to_srgb(image).clamp(0.0, 1.0)
 
+    # Optional mirror-pad for portrait context (our addition, not DSINE-canonical)
     if pad:
         padded, (top, left, h, w) = _pad_for_dsine(srgb)
-        input_tensor = padded.unsqueeze(0).to(device)
+        x = padded
     else:
-        input_tensor = srgb.unsqueeze(0).to(device)
+        x = srgb
+        _, h, w = srgb.shape
+        top, left = 0, 0
+
+    from utils import utils as dsine_utils  # type: ignore  # from DSINE repo
+
+    # Build the [1, 3, H, W] tensor that DSINE's pipeline expects
+    img = x.unsqueeze(0).to(device)
+    _, _, orig_H, orig_W = img.shape
+
+    # Apply ImageNet normalization BEFORE pad_input (pad_input pads with the
+    # normalized-zero values, which only makes sense after normalization)
+    img = _IMAGENET_NORMALIZE(img.squeeze(0)).unsqueeze(0)
+
+    # Build default intrinsics for 60° FoV (matches DSINE's Predictor default).
+    # Their function lives in utils.projection, not utils.utils.
+    from utils.projection import intrins_from_fov  # type: ignore  # from DSINE repo
+    intrins = intrins_from_fov(
+        new_fov=60.0, H=orig_H, W=orig_W, device=device
+    ).unsqueeze(0)
+
+    # Pad image and adjust intrinsics to multiples of 32
+    lrtb = dsine_utils.get_padding(orig_H, orig_W)
+    img, intrins = dsine_utils.pad_input(img, intrins, lrtb)
 
     with torch.no_grad():
-        # DSINE typically returns a list of multi-scale outputs; last one is finest
-        output = model(input_tensor)
-        if isinstance(output, (list, tuple)):
-            normals = output[-1]
-        else:
-            normals = output
+        # Try with mode='test' first (their canonical test-time call), fall
+        # back to no-mode call if the model doesn't accept it.
+        try:
+            out = model(img, intrins=intrins, mode="test")
+        except TypeError:
+            out = model(img, intrins=intrins)
 
-    # normals shape: [1, 3, H_pad, W_pad], values already in [-1, 1] for most DSINE versions
-    normals = normals.squeeze(0).cpu()
+        pred_norm = out[-1] if isinstance(out, (list, tuple)) else out
+        # Crop the padded part: their code uses [t:t+orig_H, l:l+orig_W]
+        l_p, _, t_p, _ = lrtb
+        pred_norm = pred_norm[:, :3, t_p:t_p + orig_H, l_p:l_p + orig_W]
 
+    pred_norm = pred_norm.squeeze(0).cpu()
+
+    # Crop back from our reflect-padding for portrait context
     if pad:
-        normals = normals[:, top : top + h, left : left + w]
+        pred_norm = pred_norm[:, top : top + h, left : left + w]
 
-    # Normalize to unit vectors (defensive — DSINE usually outputs unit vectors but not always)
-    norm = normals.norm(dim=0, keepdim=True).clamp_min(1e-6)
-    normals = normals / norm
+    # Defensive renormalize
+    pred_norm = pred_norm / pred_norm.norm(dim=0, keepdim=True).clamp_min(1e-6)
 
-    # DSINE convention check: their Z axis points away from camera in some versions.
-    # Our convention: Z toward camera (so faces facing camera have positive Z).
-    # If after this you see faces appearing to face away, flip the Z channel:
-    #   normals[2] = -normals[2]
-    # We will check this empirically once we have a test image.
+    # DSINE's Z convention already matches ours (positive Z = toward camera),
+    # so no flip needed. (Verified empirically against a portrait visualization.)
 
-    return normals.float()
+    return pred_norm.float()

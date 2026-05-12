@@ -59,7 +59,7 @@ def _load_intrinsic_pipeline(device: torch.device):
     # The Intrinsic repo exposes a load_models() helper and a run_pipeline() function
     from intrinsic.pipeline import load_models, run_pipeline  # type: ignore
 
-    pipeline = load_models("paper_weights", device=str(device))
+    pipeline = load_models("v2", device=str(device))
 
     _INTRINSIC_PIPELINE = (pipeline, run_pipeline)
     _INTRINSIC_DEVICE = device
@@ -94,12 +94,13 @@ def estimate_albedo(
     with torch.no_grad():
         result = run_pipeline(pipeline, np_img, device=str(device))
 
-    # result is a dict — keys vary by version. Common: 'albedo', 'hr_alb', 'inv_shading'.
-    # Prefer high-res albedo if available.
+    # v2 colorful pipeline returns 'hr_alb' (high-res albedo). Older models
+    # may have returned 'gry_alb' (grayscale albedo). Prefer the colorful one.
     albedo_np = None
-    for key in ("hr_alb", "albedo", "alb"):
+    for key in ("hr_alb", "lr_alb", "gry_alb", "albedo", "alb"):
         if key in result:
             albedo_np = result[key]
+            print(f"  Intrinsic pipeline output key used: '{key}'")
             break
 
     if albedo_np is None:

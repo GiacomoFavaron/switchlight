@@ -17,6 +17,8 @@ dependencies = [
     # Foreground matting
     "rembg>=2.0.50",
     "onnxruntime>=1.16.0",
+    # DSINE backbone
+    "geffnet>=1.0.2",
     # Numerics
     "numpy>=1.24.0,<2.0.0",  # pinned <2 for compatibility with older deps
     "scipy>=1.11.0",
