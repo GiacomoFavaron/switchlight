@@ -876,19 +876,32 @@ def sample_brdf_lut(lut: torch.Tensor, n_dot_v: torch.Tensor, roughness: torch.T
     Returns:
         [..., 2] tensor with (scale, bias).
     """
-    # Build a [..., 1, 1, 2] grid for F.grid_sample.
     nov = n_dot_v.clamp(0.0, 1.0)
     rough = roughness.clamp(0.0, 1.0)
-    # grid_sample uses normalized coords in [-1, 1], x=cols=NoV, y=rows=roughness
-    grid_x = nov * 2.0 - 1.0
-    grid_y = rough * 2.0 - 1.0
-    grid = torch.stack([grid_x, grid_y], dim=-1).view(-1, 1, 1, 2)
-    # Sample (LUT is [2, H, W]; we need batch dim, so add it once)
+
+    # Original input shape (we restore this at the end)
+    out_shape = nov.shape
+
+    # Flatten to N points
+    nov_flat = nov.reshape(-1)
+    rough_flat = rough.reshape(-1)
+
+    # grid_sample uses normalized coords in [-1, 1].
+    # x axis = LUT cols = NoV; y axis = LUT rows = roughness.
+    grid_x = nov_flat * 2.0 - 1.0
+    grid_y = rough_flat * 2.0 - 1.0
+
+    # Pack as [1, 1, N, 2] — one image, height 1, width N, 2-channel grid.
+    # That way we sample from a single (un-tiled) LUT instead of tiling it N times.
+    grid = torch.stack([grid_x, grid_y], dim=-1).view(1, 1, -1, 2)
+
     lut_b = lut.unsqueeze(0)  # [1, 2, H, W]
-    # Tile lut to match batch
-    n_samples = grid.shape[0]
-    lut_b = lut_b.expand(n_samples, -1, -1, -1).contiguous()
-    sampled = F.grid_sample(lut_b, grid, mode="bilinear", padding_mode="border", align_corners=False)
-    # sampled: [N, 2, 1, 1] -> [N, 2]
-    sampled = sampled.squeeze(-1).squeeze(-1)
-    return sampled.view(*n_dot_v.shape, 2)
+    sampled = F.grid_sample(
+        lut_b, grid,
+        mode="bilinear", padding_mode="border", align_corners=False,
+    )  # [1, 2, 1, N]
+
+    # [1, 2, 1, N] -> [N, 2]
+    sampled = sampled.squeeze(2).squeeze(0).T
+
+    return sampled.reshape(*out_shape, 2)
