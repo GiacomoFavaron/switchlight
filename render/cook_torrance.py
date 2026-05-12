@@ -100,3 +100,43 @@ def cook_torrance_shade(
     # --- Final radiance, masked ---
     output = (L_diffuse + L_specular) * mask                      # [3, H, W]
     return output
+
+
+def normalize_exposure(pred: torch.Tensor, gt: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Scale 'pred' so its mean luminance over the foreground matches 'gt'.
+
+    Our renderer's absolute brightness scale is arbitrary (depends on HDRI
+    intensity and tone-map exposure). For meaningful pixel-wise comparison,
+    we match exposure first.
+    """
+    fg = mask > 0.5
+    if fg.sum() < 1:
+        return pred
+    # Mean luminance over foreground
+    def lum(x):
+        return 0.2126 * x[0] + 0.7152 * x[1] + 0.0722 * x[2]
+    pred_lum = lum(pred)[fg.squeeze(0)].mean()
+    gt_lum = lum(gt)[fg.squeeze(0)].mean()
+    scale = (gt_lum / pred_lum.clamp_min(1e-8)).clamp(0.01, 100.0)
+    return pred * scale
+
+
+
+def compute_mae(
+    pred: torch.Tensor,
+    gt: torch.Tensor,
+    mask: torch.Tensor,
+) -> float:
+    """Foreground-masked mean absolute error in linear RGB.
+
+    Args:
+        pred: [3, H, W] prediction.
+        gt:   [3, H, W] ground truth.
+        mask: [1, H, W] foreground mask in [0, 1].
+
+    Returns:
+        scalar MAE averaged over foreground pixels and color channels.
+    """
+    fg = (mask > 0.5).squeeze(0).float()
+    abs_diff = (pred - gt).abs() * fg.unsqueeze(0)
+    return (abs_diff.sum() / (fg.sum() * 3).clamp_min(1)).item()
