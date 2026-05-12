@@ -1,6 +1,154 @@
 # Session Summary
 
 ## Goal
+Complete Milestone A2 (the physically-based renderer) and validate it against Hrithik's Blender ground truth. The validation step was the load-bearing checkpoint of the whole project: if our renderer's output agrees with Blender's reference under the same buffers + HDRI, the physics path is verified end-to-end and downstream training has a known-correct baseline to learn from.
+
+## Completed
+
+### A1 — Inverse rendering frontend (still locked, from session 1)
+Unchanged. Bundle extraction continues to work on real portraits.
+
+### A2 — Cook-Torrance + IBL renderer
+All 7 sub-steps validated:
+
+1. HDRI load + tonemap (`render/hdri.py::load_hdri`)
+2. Latlong ↔ cubemap conversion (round-trip near-identical)
+3. Diffuse irradiance prefilter (Frisvad tangent frame, Hammersley + firefly clamp)
+4. Specular GGX prefilter mip chain (Karis split-sum, mip-biased sampling)
+5. BRDF integration LUT (vectorized, LearnOpenGL canonical form)
+6. Cook-Torrance shading validated on synthetic sphere grid (textbook PBR result)
+7. Cook-Torrance shading validated on real portraits (jack, hrithik)
+
+### A2 validation against Blender GT (THIS SESSION)
+
+Hrithik's C1 landed in parallel: `data/blender/smoke_test/frame_0000.pt` is a Blender-rendered character with all GT buffers + beauty render packed into the shared bundle contract. We ran our renderer on those buffers + the same HDRI and compared output.
+
+**Result: MAE = 0.041 in linear RGB over the foreground.**
+
+Visual agreement is strong:
+- Same lighting direction (upper-right, matching the umbrella in the studio HDRI)
+- Same brightness pattern (forehead/cheeks/shoulders bright; chest/lower-body darker)
+- Same overall color tone
+- Costume materials read correctly (red armor reads red, teal sleeves read teal)
+
+Residual error concentrated where expected:
+- **Skin** — looks slightly translucent/glossy (no subsurface scattering in our model; this is precisely the gap the refinement UNet (B2) is meant to fill)
+- **Specular highlights on armor** — softened vs. Blender's path-traced reference (consequence of split-sum approximation)
+- **Hair** — slightly over-shiny (no anisotropic BRDF)
+- **Constant material assumption** — Hrithik's bundle ships constant roughness=0.5 and F0=0.04; Blender uses per-pixel material maps from the Principled BSDF. This explains most of the per-region disagreement.
+
+All three error sources are well-understood limitations of physics-only Cook-Torrance, and all three are directly addressable by the refinement UNet which is Alex's next milestone.
+
+### Supporting infrastructure (this session)
+
+- `render/cook_torrance.py` — forward shader (split-sum IBL)
+- `render/cache.py` — disk cache for prefiltered HDRIs (SHA1-keyed, ~3 min per HDRI once, instant after)
+- `scripts/relight.py` — end-to-end relighting CLI (single + batch modes, debug-grid output)
+- `scripts/compare_to_blender.py` — validation script that produces the renderer-vs-Blender triptych and MAE
+
+## Technical Decisions
+
+### Validation methodology
+The validation does **exposure-matching** before computing MAE — our renderer's absolute brightness scale is arbitrary (depends on HDRI intensity and exposure choice), so a meaningful comparison normalizes mean foreground luminance to match Blender's reference before taking the per-pixel difference. This is standard practice in IBL papers.
+
+### Path remapping in bundles
+Initial bundle had absolute paths baked in (`/Users/hrithikg/...`); Hrithik re-packed with repo-relative paths after the issue was raised. **Going forward: all bundle paths are relative to repo root.**
+
+### Skin appearance — known limitation
+Our Cook-Torrance output makes skin look slightly translucent/dry compared to Blender's reference. The cause is that Cook-Torrance models only surface reflection; real skin gets ~30% of its perceived appearance from subsurface scattering (light entering, scattering 1-2mm inside, exiting nearby). We chose not to model SSS because:
+1. SSS adds substantial complexity (multiple-bounce simulation or learned approximation)
+2. SwitchLight's own approach is to let a refinement UNet learn this residual rather than model it explicitly
+3. The MAE = 0.041 result is acceptable as physics-only baseline; the UNet's job is to close the remaining gap
+
+### What we are NOT trying to fix at the renderer level
+- Subsurface scattering / skin "alive" look → deferred to UNet (B2)
+- Sharp specular highlights on glossy materials → consequence of split-sum, accepted
+- Anisotropic hair BRDF → not modeled, accepted
+- Per-material reflectance variation → future work (would need real material maps from Blender)
+
+## Onboarding (unchanged)
+
+```bash
+source .venv/bin/activate
+uv pip install -e ".[train,dev]"
+bash scripts/setup_third_party.sh
+uv pip install ./third_party/Intrinsic
+```
+
+To run the full renderer-validation pipeline end-to-end:
+
+```bash
+# Relight a real photo under any HDRI
+python scripts/relight.py \
+    --input <portrait.jpg> --hdri data/hdris/<file>.hdr \
+    --output outputs/relit.png --save-debug-grid
+
+# Validate against Blender GT
+python scripts/compare_to_blender.py \
+    --bundle data/blender/smoke_test/frame_0000.pt
+```
+
+## Files Created/Changed (this session)
+
+```
+switchlight/
+├── render/
+│   ├── cook_torrance.py        # NEW — forward shader
+│   ├── cache.py                # NEW — prefilter disk cache
+│   └── hdri.py                 # extended with prefilter functions
+└── scripts/
+    ├── relight.py              # NEW — main relighting entry point
+    ├── compare_to_blender.py   # NEW — validation against Blender GT
+    ├── sweep_materials.py      # NEW — (optional) material constant sweep
+    ├── test_cubemap.py         # NEW
+    ├── test_diffuse_prefilter.py  # NEW
+    ├── test_specular_prefilter.py # NEW
+    ├── test_brdf_lut.py        # NEW (saves data/brdf_lut.pt)
+    ├── test_sphere_render.py   # NEW
+    └── visualize_hdri.py       # NEW
+```
+
+## Blockers
+None. A1 + A2 + Hrithik's C1 (validated) are all green. The pipeline is fully connected end-to-end.
+
+## Next Steps
+
+**Jack (immediate):** A3 — polish the inference pipeline.
+- Currently `scripts/relight.py` works but pays the buffer-extraction cost on every `--input` run. For batch processing over the team's photos, we'll want a `--batch-bundle-dir` that consumes pre-extracted bundles.
+- Generate hero figures for the report: 3 team members × 3+ HDRIs = relighting matrix.
+- Then A4 (UNet integration) once Alex's B2 produces a checkpoint.
+
+**Hrithik (immediate):** Scale C1 → C2.
+- The bundle format is now battle-tested. Next is scaling to ~30 single-HDRI bundles using a varied HDRI set (warm indoor, cool office, outdoor, sunset, neon, etc.)
+- Optional but high-value: export real per-pixel `roughness` and `specular` maps from Blender's Principled BSDF, not constants. This would tighten our renderer-vs-Blender MAE further and give Alex's UNet a richer training signal.
+
+**Alex (immediate, unblocked):** B1 — UNet architecture + training loop.
+- Data loader contract is locked (see below). Use `frame_0000.pt` as the validation single-frame to develop against.
+- The UNet input: concat of (rendered_input, albedo, normal) → 9 channels in. Output: 3-channel residual added to rendered_input.
+- "Rendered input" comes from running our renderer on each bundle's buffers. This is the same pipeline `compare_to_blender.py` exercises — see that script for the canonical pattern.
+
+## Critical contract (locked)
+
+```python
+torch.save({
+    'image':     Tensor[3,H,W] float32 linear RGB [0,1],
+    'normal':    Tensor[3,H,W] float32 camera-space [-1,1], +Z toward camera,
+    'albedo':    Tensor[3,H,W] float32 linear RGB [0,1],
+    'roughness': Tensor[1,H,W] float32 [0.05, 1.0],
+    'specular':  Tensor[1,H,W] float32 [0, 1],
+    'mask':      Tensor[1,H,W] float32 [0, 1],
+    'hdri_path': str (relative to repo root),
+    'meta':      dict,
+}, 'frame_NNNN.pt')
+```
+
+## Headline result for the report
+
+> "We implemented a from-scratch physics-based portrait renderer using split-sum IBL with GGX importance-sampled specular prefiltering and image-based diffuse irradiance. Validation against Blender Cycles reference renders (same buffers, same HDRI, same camera) yields MAE = 0.041 in linear RGB over foreground pixels. Residual error is concentrated in regions where Cook-Torrance is known to be insufficient — subsurface-scattering skin, sharp specular highlights, and anisotropic hair — and is addressed by the refinement UNet in the downstream stage."
+
+# Session Summary
+
+## Goal
 Build the inverse rendering frontend (Milestone A1) for the SwitchLight portrait relighting pipeline: a CLI that takes any portrait image and produces a complete "buffer bundle" (surface normals, albedo, foreground mask, plus constant material properties) ready to feed into downstream rendering and training.
 
 ## Completed
