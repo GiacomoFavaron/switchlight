@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ML artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.tflite
+checkpoints/
+runs/
+wandb/
+
+# Data — too big for git, lives in Drive
+data/synthetic/
+data/real/
+data/hdris/
+*.hdr
+*.exr
+*.png.linear
+
+# But keep the Blender scene file under version control
+!data/blender/scene.blend
+
+# Outputs
+outputs/
+*.log
+
+# Cached prefiltered HDRIs
+cache/
+*.prefiltered
+
+# OS junk
+Thumbs.db
+.DS_Store
