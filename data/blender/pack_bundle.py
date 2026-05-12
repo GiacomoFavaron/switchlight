@@ -1,3 +1,4 @@
+import argparse
 import json
 from pathlib import Path
 
@@ -7,8 +8,6 @@ import torch
 
 
 ROOT = Path("/Users/hrithikg/SWRepos/switchlight")
-SMOKE_DIR = ROOT / "data/blender/smoke_test"
-OUT_PATH = SMOKE_DIR / "frame_0000.pt"
 
 
 def srgb_to_linear(x: np.ndarray) -> np.ndarray:
@@ -70,10 +69,8 @@ def read_camera_normal_png(path: Path) -> torch.Tensor:
 
     normal_rgb = normal_rgb.astype(np.float32) / 255.0
 
-    # Do NOT sRGB-linearize normals. They are encoded data, not color.
     normal = normal_rgb * 2.0 - 1.0
 
-    # Normalize just in case PNG quantization made vectors slightly non-unit.
     length = np.linalg.norm(normal, axis=2, keepdims=True)
     normal = normal / np.maximum(length, 1e-8)
 
@@ -81,20 +78,35 @@ def read_camera_normal_png(path: Path) -> torch.Tensor:
 
 
 def main():
-    meta_path = SMOKE_DIR / "meta.json"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-dir", default="data/blender/smoke_test")
+    parser.add_argument("--output", default=None)
+    parser.add_argument("--frame", default="0000")
+    args = parser.parse_args()
+
+    input_dir = ROOT / args.input_dir
+
+    if args.output is None:
+        out_path = input_dir / f"frame_{args.frame}.pt"
+    else:
+        out_path = ROOT / args.output
+
+    meta_path = input_dir / "meta.json"
 
     with open(meta_path, "r") as f:
         meta = json.load(f)
 
-    image = read_rgb_png(SMOKE_DIR / "beauty_0000.png", linearize=True)
-    albedo = read_rgb_png(SMOKE_DIR / "albedo_0000.png", linearize=True)
-    normal = read_camera_normal_png(SMOKE_DIR / "normal_camera_0000.png")
-    mask = read_mask_png(SMOKE_DIR / "mask_0000.png")
+    image = read_rgb_png(input_dir / "beauty_0000.png", linearize=True)
+    albedo = read_rgb_png(input_dir / "albedo_0000.png", linearize=True)
+    normal = read_camera_normal_png(input_dir / "normal_camera_0000.png")
+    mask = read_mask_png(input_dir / "mask_0000.png")
 
     h, w = mask.shape[1:]
 
     roughness = torch.full((1, h, w), 0.5, dtype=torch.float32)
     specular = torch.full((1, h, w), 0.04, dtype=torch.float32)
+
+    hdri_path = meta.get("hdri_path")
 
     bundle = {
         "image": image,
@@ -103,21 +115,20 @@ def main():
         "roughness": roughness,
         "specular": specular,
         "mask": mask,
-        "hdri_path": str(
-    Path(meta.get("hdri_path")).relative_to(ROOT)
-),
+        "hdri_path": hdri_path,
         "meta": meta,
     }
 
-    torch.save(bundle, OUT_PATH)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(bundle, out_path)
 
-    print(f"Saved bundle to: {OUT_PATH}")
+    print(f"Saved bundle to: {out_path}")
 
     for k, v in bundle.items():
         if torch.is_tensor(v):
             print(k, tuple(v.shape), v.dtype, float(v.min()), float(v.max()))
         else:
-            print(k, type(v))
+            print(k, type(v), v)
 
 
 if __name__ == "__main__":
