@@ -22,14 +22,22 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ### Set up the project
 
 ```bash
-git clone https://github.com/<your-org>/switchlight.git
+git clone git@github.com:GiacomoFavaron/switchlight.git
 cd switchlight
 uv venv --python 3.10
 source .venv/bin/activate    # macOS/Linux
+
+# 1. Install project + declared dependencies
 uv pip install -e ".[train,dev]"
+
+# 2. Clone third-party model repos (DSINE, Intrinsic)
+bash scripts/setup_third_party.sh
+
+# 3. Install the Intrinsic package (pulls in chrislib, altered_midas, etc.)
+uv pip install ./third_party/Intrinsic
 ```
 
-That's it. `uv pip install -e .` installs the project in editable mode along with all dependencies. The `[train,dev]` extras pull in things you only need for training and development.
+**First run note:** the inverse rendering frontend downloads ~3GB of model weights from HuggingFace and GitHub the first time it runs. Subsequent runs are fast (~22s/image at 768×768 on M1 Max).
 
 ### Verify install
 
