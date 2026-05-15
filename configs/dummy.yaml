@@ -1,0 +1,23 @@
+seed: 5405
+
+data:
+  root: data/blender/dataset
+  image_size: 384
+  batch_size: 4
+  augment: true
+  num_workers: 0
+
+train:
+  batch_size: 4
+  max_steps: 200
+  lr: 0.0001
+  weight_decay: 0.0001
+  checkpoint_every: 50
+  log_every: 10
+  checkpoint_dir: outputs/checkpoints/b1
+  log_path: outputs/logs/b1_train.jsonl
+
+loss:
+  l1_weight: 1.0
+  vgg_weight: 0.0
+  vgg_pretrained: true
