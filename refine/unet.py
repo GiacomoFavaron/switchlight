@@ -68,10 +68,10 @@ class UpBlock(nn.Module):
 
 
 class RefinementUNet(nn.Module):
-    """Predict a bounded residual for a rendered portrait.
+    """Predict a residual for a rendered portrait.
 
     Input channels are rendered RGB, albedo RGB, and normal XYZ.
-    Output is a residual to add to rendered RGB, bounded to [-0.5, 0.5].
+    Output is an unbounded residual to add to rendered RGB.
     """
 
     def __init__(self, in_channels: int = 9, base_channels: int = 32) -> None:
@@ -109,7 +109,7 @@ class RefinementUNet(nn.Module):
         x = self.up2(x, skip2)
         x = self.up1(x, skip1)
 
-        return torch.tanh(self.head(x)) * 0.5
+        return self.head(x)
 
 
 def count_parameters(model: nn.Module) -> int:
@@ -126,4 +126,4 @@ if __name__ == "__main__":
         residual = net(dummy)
     print(f"Input shape:  {tuple(dummy.shape)}")
     print(f"Output shape: {tuple(residual.shape)}")
-    print(f"Output range: [{residual.min().item():.3f}, {residual.max().item():.3f}]")
+    print(f"Sample output range: [{residual.min().item():.3f}, {residual.max().item():.3f}]")

@@ -70,21 +70,19 @@ class SwitchLightDataset(Dataset):
         buffers["normal"] = F.normalize(buffers["normal"], dim=0, eps=1e-6)
 
         if "rendered_input" in bundle:
-            rendered_input = _resize_chw(bundle["rendered_input"], self.image_size).clamp(0.0, 1.0)
+            rendered_input = _resize_chw(bundle["rendered_input"], self.image_size)
         else:
             # B1 placeholder until Cook-Torrance pre-rendered inputs are generated.
             rendered_input = buffers["image"].clone()
 
-        gt_image = buffers["image"]
-
         if self.augment and random.random() < 0.5:
             rendered_input = torch.flip(rendered_input, dims=(-1,))
-            gt_image = torch.flip(gt_image, dims=(-1,))
             for key, value in list(buffers.items()):
                 if torch.is_tensor(value):
                     buffers[key] = torch.flip(value, dims=(-1,))
             buffers["normal"][0] = -buffers["normal"][0]
 
+        gt_image = buffers["image"]
         buffers["path"] = str(path)
         buffers["hdri_path"] = bundle.get("hdri_path")
         return rendered_input, gt_image, buffers
