@@ -62,3 +62,5 @@ third_party/
 # Personal test images (kept locally, not in repo)
 portrait.jpg
 test_inputs/
+
+switchlight.code-workspace
