@@ -1,0 +1,22 @@
+seed: 5405
+
+data:
+  root: data/blender/dataset_augmented
+  image_size: 384
+  augment: true
+  num_workers: 2
+
+train:
+  batch_size: 4
+  max_steps: 1000
+  lr: 0.0001
+  weight_decay: 0.0001
+  checkpoint_every: 100
+  log_every: 1
+  checkpoint_dir: /content/drive/MyDrive/switchlight/checkpoints/b2_retry_vgg01
+  log_path: /content/drive/MyDrive/switchlight/logs/b2_retry_vgg01_train.jsonl
+
+loss:
+  l1_weight: 1.0
+  vgg_weight: 0.1
+  vgg_pretrained: true
