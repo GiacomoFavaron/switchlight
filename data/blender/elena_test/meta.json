@@ -1,0 +1,17 @@
+{
+  "frame_id": "0001",
+  "asset": "/Users/hrithikg/SWRepos/switchlight/data/blender/assets/elena in the mountains.blend",
+  "hdri_path": "data/blender/hdri/courtyard_2k.hdr",
+  "resolution": [
+    768,
+    768
+  ],
+  "samples": 64,
+  "outputs": {
+    "beauty": "beauty_*.png",
+    "albedo": "albedo_*.png",
+    "mask": "mask_*.png",
+    "normal_world_debug": "normal_world_*.png",
+    "normal_camera": "normal_camera_*.png"
+  }
+}
