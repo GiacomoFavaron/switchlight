@@ -65,3 +65,6 @@ test_inputs/
 switchlight.code-workspace
 
 TEAM_CONTEXT.md
+# Large generated artifacts (regenerate via batch_render.py)
+/bundle.pt
+data/blender/dataset_augmented/
