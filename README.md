@@ -81,9 +81,11 @@ input.jpg ──► extract_buffers ──► (normal, albedo, roughness, specul
 ```
 
 ## Quick start
+```
 
 # Extract buffers from a portrait
 python scripts/extract_buffers.py --input photo.jpg --output bundle.pt
 
 # Relight with a target HDRI
 python scripts/relight.py --input photo.jpg --hdri data/blender/hdri/courtyard_2k.hdr --output relit.png
+```
