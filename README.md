@@ -4,9 +4,9 @@ SwitchLight-inspired portrait relighting pipeline. COMP5405 Digital Media Comput
 
 ## Team
 
-- Jack (Giacomo Favaron) — Rendering & Pipeline
-- Alex — Training & Refinement UNet
-- Hrithik — Blender Data & Evaluation
+- 560472101  — Rendering & Pipeline
+- 560401374 — Training & Refinement UNet
+- 550615169 — Blender Data & Evaluation
 
 ## Setup
 
@@ -80,17 +80,10 @@ input.jpg ──► extract_buffers ──► (normal, albedo, roughness, specul
                                   final relit image
 ```
 
-## Quick start (once A1 lands)
+## Quick start
 
-```bash
 # Extract buffers from a portrait
 python scripts/extract_buffers.py --input photo.jpg --output bundle.pt
 
-# (later, once renderer exists) Relight with a target HDRI
-python scripts/relight.py --input photo.jpg --hdri studio.hdr --output relit.png
-```
-
-## See also
-
-- `00_OVERVIEW.md` — shared decisions, tensor contracts, dependency graph
-- `01_JACK.md` / `02_ALEX.md` / `03_HRITHIK.md` — per-person detailed plans
+# Relight with a target HDRI
+python scripts/relight.py --input photo.jpg --hdri data/blender/hdri/courtyard_2k.hdr --output relit.png
